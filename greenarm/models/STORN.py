@@ -29,7 +29,7 @@ class Phases:
 
 class STORNModel(object):
     def __init__(self, latent_dim=7, data_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, n_deep=6, dropout=0, activation='tanh',
-                 with_trending_prior=False, monitor=False):
+                 with_trending_prior=False, monitor=False, prefix=None):
         # Tensor shapes
         self.data_dim = data_dim
         self.latent_dim = latent_dim
@@ -53,6 +53,7 @@ class STORNModel(object):
 
         # Misc
         self.monitor = monitor
+        self.prefix = prefix or ""
 
     def get_params(self):
         return {
@@ -257,17 +258,15 @@ class STORNModel(object):
     def reset_predict_model_states(self):
         self.predict_model.reset_states()
 
-    def save(self, prefix=None):
-        if prefix is None:
-            prefix = "saved_models/STORN_%s.model" % int(time.time())
-
-        logger.info("Saving model to %s" % prefix)
+    def save(self):
+  
+        logger.info("Saving model to %s" % self.prefix)
 
         # with codecs.open(prefix + ".json", "w", "UTF-8") as of:
         #     of.write(self.train_model.to_json())
 
-        self.train_model.save_weights(prefix + ".weights.h5")
-        return prefix
+        self.train_model.save_weights(self.prefix + "weights.h5")
+        return self.prefix
 
     @staticmethod
     def shift_z(rec_z):
