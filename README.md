@@ -2,7 +2,10 @@
 
 The implementation can be found in greenarm/models/STORN.py!
 
+The original implementation was updated to work with the newest Keras and Theano/ Tensorflow version
+
 ### Required packages
+ - Python 2.7 / 3.7
  - keras >= 2.2
  - theano >= 1.0.4
  - scikit-learn>=0.2
@@ -12,6 +15,13 @@ The implementation can be found in greenarm/models/STORN.py!
  - [hualos](https://github.com/fchollet/hualos) (optional monitoring)
 
 The dependencies might be installed with the `pip` requirements file.
+
+### Changes
+ - 'LambdaWithMasking' class conforms to the new Keras Object Model
+ - Functional API calls to `merge` were replaced by `Concatenate`
+ - Name Scopes were introduced
+ - Hard coded data dimensionality was moved into keyword arguments
+ - Shape function calls were updated
 
 ---
 **NOTE**
