@@ -23,6 +23,29 @@ The dependencies might be installed with the `pip` requirements file.
  - Hard coded data dimensionality was moved into keyword arguments
  - Shape function calls were updated
 
+### Usage
+
+```python
+from greenarm.models import STORN as storn
+
+import numpy as np
+
+# Read and split the data
+sequence_size = 30
+data = np.fromfile("...")
+sequences = len(data) // sequence_size
+train_x_next = np.stack(np.split(data[1:sequences * sequence_size], sequences))
+train_x_prev = np.stack(np.split(data[:sequences * sequence_size - 1], sequences))
+
+# Examplary load of one file
+inputs = [train_x_next, train_x_prev]
+n_features = data.shape[-1]
+storn_model = storn.STORNModel(activation='tanh', n_deep=6, data_dim=n_features, latent_dim=n_features, 
+                               with_trending_prior=True, n_hidden_dense=64, prefix="my_prefix")
+target = train_x_next
+storn_model.fit(inputs, target, max_epochs=400)
+```
+
 ---
 **NOTE**
 
