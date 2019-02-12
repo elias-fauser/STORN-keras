@@ -1,5 +1,8 @@
+import sys
 from keras.engine import Layer
-from keras.layers import Lambda, sys, python_types, marshal, K, inspect
+from keras.layers import Lambda
+from keras import backend as K
+import types, marshal, inspect
 
 
 class LambdaWithMasking(Layer):
@@ -67,7 +70,7 @@ class LambdaWithMasking(Layer):
 
         super(LambdaWithMasking, self).__init__(**kwargs)
 
-    def get_output_shape_for(self, input_shape):
+    def compute_output_shape(self, input_shape):
         if self._output_shape is None:
             # if TensorFlow, we can infer the output shape directly:
             if K._BACKEND == 'tensorflow':
@@ -109,7 +112,7 @@ class LambdaWithMasking(Layer):
     def get_config(self):
         py3 = sys.version_info[0] == 3
 
-        if isinstance(self.function, python_types.LambdaType):
+        if isinstance(self.function, types.LambdaType):
             if py3:
                 function = marshal.dumps(self.function.__code__).decode('raw_unicode_escape')
             else:
@@ -119,7 +122,7 @@ class LambdaWithMasking(Layer):
             function = self.function.__name__
             function_type = 'function'
 
-        if isinstance(self._mask_function, python_types.LambdaType):
+        if isinstance(self._mask_function, types.LambdaType):
             if py3:
                 mask_func = marshal.dumps(self._mask_function.__code__).decode('raw_unicode_escape')
             else:
@@ -132,7 +135,7 @@ class LambdaWithMasking(Layer):
             mask_func = 'unknown'
             mask_func_type = 'unknown'
 
-        if isinstance(self._output_shape, python_types.LambdaType):
+        if isinstance(self._output_shape, types.LambdaType):
             if py3:
                 output_shape = marshal.dumps(self._output_shape.__code__)
             else:
@@ -145,14 +148,14 @@ class LambdaWithMasking(Layer):
             output_shape = self._output_shape
             output_shape_type = 'raw'
 
-        config = {'function': function,
+        config = {'function': str(function),
                   'function_type': function_type,
                   'mask_function': mask_func,
                   'mask_function_type': mask_func_type,
-                  'output_shape': output_shape,
+                  'output_shape': str(output_shape),
                   'output_shape_type': output_shape_type,
                   'arguments': self.arguments}
-        base_config = super(Lambda, self).get_config()
+        base_config = super(LambdaWithMasking, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
     @classmethod
@@ -162,7 +165,7 @@ class LambdaWithMasking(Layer):
             function = globals()[config['function']]
         elif function_type == 'lambda':
             function = marshal.loads(config['function'].encode('raw_unicode_escape'))
-            function = python_types.FunctionType(function, globals())
+            function = types.FunctionType(function, globals())
         else:
             raise Exception('Unknown function type: ' + function_type)
 
@@ -171,7 +174,7 @@ class LambdaWithMasking(Layer):
             mask_function = globals()[config['mask_function']]
         elif mask_function_type == 'lambda':
             mask_function = marshal.loads(config['mask_function'].encode('raw_unicode_escape'))
-            mask_function = python_types.FunctionType(mask_function, globals())
+            mask_function = types.FunctionType(mask_function, globals())
         else:
             raise Exception('Unknown function type: ' + mask_function_type)
 
@@ -180,7 +183,7 @@ class LambdaWithMasking(Layer):
             output_shape = globals()[config['output_shape']]
         elif output_shape_type == 'lambda':
             output_shape = marshal.loads(config['output_shape'])
-            output_shape = python_types.FunctionType(output_shape, globals())
+            output_shape = types.FunctionType(output_shape, globals())
         else:
             output_shape = config['output_shape']
 

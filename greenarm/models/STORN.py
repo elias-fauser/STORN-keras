@@ -5,12 +5,11 @@ import logging
 import numpy as np
 import time
 import keras.backend as K
-from keras.callbacks import ModelCheckpoint, EarlyStopping, RemoteMonitor
-from keras.engine import merge
+from keras.callbacks import ModelCheckpoint, EarlyStopping, RemoteMonitor, TensorBoard
 from keras.models import Model
-from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN
+from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN, Concatenate
 from greenarm.models.keras_fix.lambdawithmasking import LambdaWithMasking
-from greenarm.models.loss.variational import keras_variational
+from greenarm.models.loss.variational import keras_variational_func
 from greenarm.models.sampling.sampling import sample_gauss
 from greenarm.util import add_samples_until_divisible, get_logger
 
@@ -29,10 +28,10 @@ class Phases:
 
 
 class STORNModel(object):
-    def __init__(self, latent_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, n_deep=6, dropout=0, activation='tanh',
+    def __init__(self, latent_dim=7, data_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, n_deep=6, dropout=0, activation='tanh',
                  with_trending_prior=False, monitor=False):
         # Tensor shapes
-        self.data_dim = 7
+        self.data_dim = data_dim
         self.latent_dim = latent_dim
 
         # Network complexity
@@ -74,70 +73,73 @@ class STORNModel(object):
 
     def _build(self, phase, seq_shape=None, batch_size=None):
         # Recognition model
-        self.z_recognition_model = STORNRecognitionModel(self.data_dim, self.latent_dim, self.n_hidden_dense,
-                                                         self.n_hidden_recurrent, self.n_deep, self.dropout,
-                                                         self.activation)
 
-        self.z_recognition_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size)
+        with K.name_scope("recognition_model"):
+            self.z_recognition_model = STORNRecognitionModel(self.data_dim, self.latent_dim, self.n_hidden_dense,
+                                                            self.n_hidden_recurrent, self.n_deep, self.dropout,
+                                                            self.activation)
 
-        if phase == Phases.train:
-            x_tm1 = Input(shape=(seq_shape, self.data_dim), name="storn_input_train", dtype="float32")
-            z_t = self.z_recognition_model.train_z_t
-            x_t = self.z_recognition_model.train_input
-            z_post_stats = self.z_recognition_model.train_recogn_stats
-        else:
-            x_tm1 = Input(batch_shape=(batch_size, 1, self.data_dim), name="storn_input_predict", dtype="float32")
-            z_t = self.z_recognition_model.predict_z_t
-            x_t = self.z_recognition_model.predict_input
-            z_post_stats = self.z_recognition_model.predict_recogn_stats
+            self.z_recognition_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size)
 
-        # Prior model
-        if self.with_trending_prior:
-            z_tm1 = LambdaWithMasking(STORNModel.shift_z, output_shape=self.shift_z_output_shape)(z_t)
-            self.z_prior_model = STORNPriorModel(self.latent_dim, self.with_trending_prior,
-                                                 n_hidden_recurrent=self.n_hidden_recurrent, x_tm1=x_tm1, z_tm1=z_tm1)
-        else:
-            self.z_prior_model = STORNPriorModel(self.latent_dim, self.with_trending_prior)
+            if phase == Phases.train:
+                x_tm1 = Input(shape=(seq_shape, self.data_dim), name="storn_input_train", dtype="float32")
+                z_t = self.z_recognition_model.train_z_t
+                x_t = self.z_recognition_model.train_input
+                z_post_stats = self.z_recognition_model.train_recogn_stats
+            else:
+                x_tm1 = Input(batch_shape=(batch_size, 1, self.data_dim), name="storn_input_predict", dtype="float32")
+                z_t = self.z_recognition_model.predict_z_t
+                x_t = self.z_recognition_model.predict_input
+                z_post_stats = self.z_recognition_model.predict_recogn_stats
 
-        self.z_prior_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size)
+        with K.name_scope("prior_model"):
+            # Prior model
+            if self.with_trending_prior:
+                z_tm1 = LambdaWithMasking(STORNModel.shift_z, output_shape=self.shift_z_output_shape)(z_t)
+                self.z_prior_model = STORNPriorModel(self.latent_dim, self.with_trending_prior,
+                                                    n_hidden_recurrent=self.n_hidden_recurrent, x_tm1=x_tm1, z_tm1=z_tm1)
+            else:
+                self.z_prior_model = STORNPriorModel(self.latent_dim, self.with_trending_prior)
 
-        if phase == Phases.train:
-            z_prior_stats = self.z_prior_model.train_prior_stats
-        else:
-            z_prior_stats = self.z_prior_model.predict_prior_stats
+            self.z_prior_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size)
 
-        # Generative model
+            if phase == Phases.train:
+                z_prior_stats = self.z_prior_model.train_prior_stats
+            else:
+                z_prior_stats = self.z_prior_model.predict_prior_stats
 
-        # Fix of keras/engine/topology.py required for masked layer!
-        # Otherwise concat with masked and non masked layer returns an error!
-        # masked = Masking()(x_tm1)
-        # gen_input = merge(inputs=[masked, z_t], mode='concat')
+        with K.name_scope("generative_model"):
+            # Generative model
 
-        # Unmasked Layer
-        gen_input = merge(inputs=[x_tm1, z_t], mode='concat')
+            # Fix of keras/engine/topology.py required for masked layer!
+            # Otherwise concat with masked and non masked layer returns an error!
+            # masked = Masking()(x_tm1)
+            # gen_input = merge(inputs=[masked, z_t], mode='concat')
 
-        for i in range(self.n_deep):
-            gen_input = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(gen_input)
-            if self.dropout != 0:
-                gen_input = Dropout(self.dropout)(gen_input)
+            # Unmasked Layer
+            gen_input = Concatenate(axis=-1, name="generative_input")([x_tm1, z_t])
 
-        rnn_gen = RecurrentLayer(self.n_hidden_recurrent, return_sequences=True, stateful=(phase == Phases.predict),
-                                 consume_less='gpu')(gen_input)
-        gen_map = rnn_gen
-        for i in range(self.n_deep):
-            gen_map = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(gen_map)
-            if self.dropout != 0:
-                gen_map = Dropout(self.dropout)(gen_map)
+            for i in range(self.n_deep):
+                gen_input = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(gen_input)
+                if self.dropout != 0:
+                    gen_input = Dropout(self.dropout)(gen_input)
 
-        # Output statistics for the generative model
-        gen_mu = TimeDistributed(Dense(self.data_dim, activation="linear"))(gen_map)
-        gen_sigma = TimeDistributed(Dense(self.data_dim, activation="softplus"))(gen_map)
+            rnn_gen = RecurrentLayer(self.n_hidden_recurrent, return_sequences=True, stateful=(phase == Phases.predict))(gen_input)
+            gen_map = rnn_gen
+            for i in range(self.n_deep):
+                gen_map = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(gen_map)
+                if self.dropout != 0:
+                    gen_map = Dropout(self.dropout)(gen_map)
+
+            # Output statistics for the generative model
+            gen_mu = TimeDistributed(Dense(self.data_dim, activation="linear"))(gen_map)
+            gen_sigma = TimeDistributed(Dense(self.data_dim, activation="softplus"))(gen_map)
 
         # Combined model
-        output = merge([gen_mu, gen_sigma, z_post_stats, z_prior_stats], mode='concat')
+        output = Concatenate(axis=-1)([gen_mu, gen_sigma, z_post_stats, z_prior_stats])
         inputs = [x_t, x_tm1] if self.with_trending_prior else [x_t, x_tm1, z_prior_stats]
-        model = Model(input=inputs, output=output)
-        model.compile(optimizer='rmsprop', loss=keras_variational)
+        model = Model(inputs=inputs, outputs=output)
+        model.compile(optimizer='rmsprop', loss=keras_variational_func(self.data_dim, self.latent_dim))
         # metrics=[keras_gauss, keras_divergence, mu_minus_x, mean_sigma]
 
         return model
@@ -172,8 +174,9 @@ class STORNModel(object):
         train_input, valid_input = [list(t) for t in zip(*[(X[:split_idx], X[split_idx:]) for X in list_in])]
         train_target, valid_target = target[:split_idx], target[split_idx:]
 
-        checkpoint = ModelCheckpoint("best_storn_weights.h5", monitor='val_loss', save_best_only=True, verbose=1)
-        early_stop = EarlyStopping(monitor='val_loss', patience=25, verbose=1)
+        tensor_board = TensorBoard(log_dir="./logs", histogram_freq=1, write_images=True)
+        checkpoint = ModelCheckpoint("best_storn_weights.h5", save_best_only=True, verbose=1)
+        early_stop = EarlyStopping(patience=25, verbose=1)
         try:
             # A workaround so that keras does not complain about target and pred shape mismatches
             padded_target = np.concatenate(
@@ -183,12 +186,11 @@ class STORNModel(object):
                 (valid_target, np.zeros((valid_target.shape[0], seq_len, 4 * self.latent_dim + self.data_dim))),
                 axis=-1)
 
-            callbacks = [checkpoint, early_stop]
+            callbacks = [checkpoint, early_stop, tensor_board]
             if self.monitor:
                 monitor = RemoteMonitor(root='http://localhost:9000')
                 callbacks = callbacks + [monitor]
-            self.train_model.fit(train_input, padded_target, validation_data=(valid_input, [padded_valid_target]),
-                                 callbacks=callbacks, nb_epoch=max_epochs)
+            self.train_model.fit(train_input, train_target, epochs=max_epochs, validation_data=(valid_input, [valid_target]), callbacks=callbacks)
         except KeyboardInterrupt:
             logger.info("Training interrupted! Restoring best weights and saving..")
 
@@ -238,7 +240,7 @@ class STORNModel(object):
         # compute loss based on predictions
         x = K.placeholder(ndim=3, dtype="float32")
         stats = K.placeholder(ndim=3, dtype="float32")
-        get_loss = K.function(inputs=[x, stats], outputs=keras_variational(x, stats))
+        get_loss = K.function(inputs=[x, stats], outputs=keras_variational_func(self.data_dim, self.latent_dim)(x, stats))
         loss = get_loss([padded_target, predictions])
         return predictions[:, :, :data_dim], loss
 
@@ -249,7 +251,7 @@ class STORNModel(object):
         :param ground_truth: the expected value to compare to
         :return: plotting artifacts: input, prediction, and error
         """
-        pred = self.predict_one_step(inputs)[:, :, :7]
+        pred = self.predict_one_step(inputs)[:, :, :self.data_dim]
         return pred, np.mean((ground_truth - pred) ** 2, axis=-1)
 
     def reset_predict_model_states(self):
@@ -269,7 +271,7 @@ class STORNModel(object):
 
     @staticmethod
     def shift_z(rec_z):
-        return K.concatenate((K.random_normal(shape=(rec_z.shape[0], 1, rec_z.shape[2])),
+        return K.concatenate((K.random_normal(shape=(K.shape(rec_z)[0], 1, K.shape(rec_z)[2])),
                               rec_z[:, :-1, :]), axis=1)
 
     @staticmethod
@@ -319,8 +321,7 @@ class STORNRecognitionModel(object):
             if self.dropout != 0.0:
                 recogn_input = Dropout(self.dropout)(recogn_input)
 
-        recogn_rnn = RecurrentLayer(self.n_hidden_recurrent, return_sequences=True, stateful=(phase == Phases.predict),
-                                    consume_less='gpu')(recogn_input)
+        recogn_rnn = RecurrentLayer(self.n_hidden_recurrent, return_sequences=True, stateful=(phase == Phases.predict))(recogn_input)
 
         recogn_map = recogn_rnn
         for i in range(self.n_deep):
@@ -328,9 +329,9 @@ class STORNRecognitionModel(object):
             if self.dropout != 0:
                 recogn_map = Dropout(self.dropout)(recogn_map)
 
-        recogn_mu = TimeDistributed(Dense(self.latent_dim, activation='linear'))(recogn_map)
-        recogn_sigma = TimeDistributed(Dense(self.latent_dim, activation="softplus"))(recogn_map)
-        recogn_stats = merge([recogn_mu, recogn_sigma], mode='concat')
+        recogn_mu = TimeDistributed(Dense(self.latent_dim, activation='linear'), name="recognition_mu")(recogn_map)
+        recogn_sigma = TimeDistributed(Dense(self.latent_dim, activation="softplus", name="recognition_sigma"))(recogn_map)
+        recogn_stats = Concatenate(axis=-1, name="recognition_stats")([recogn_mu, recogn_sigma])
 
         # sample z from the distribution in X
         z_t = TimeDistributed(LambdaWithMasking(STORNRecognitionModel.do_sample,
@@ -355,7 +356,7 @@ class STORNRecognitionModel(object):
         sigma = statistics[:, dim_size:]
 
         if batch_size is None:
-            batch_size = mu.shape[0]
+            batch_size = K.shape(mu)[0]
 
         # sample with this mean and variance
         return sample_gauss(mu, sigma, batch_size, dim_size)
@@ -364,7 +365,7 @@ class STORNRecognitionModel(object):
     def sample_output_shape(input_shape):
         shape = list(input_shape)
         shape[-1] /= 2
-        return tuple(shape)
+        return tuple(int(s) if s is not None else None for s in shape )
 
 
 class STORNPriorModel(object):
@@ -394,16 +395,15 @@ class STORNPriorModel(object):
         return input_layer
 
     def _build_trending(self, phase):
-        prior_input = merge([self.x_tm1, self.z_tm1], mode="concat")
+        prior_input = Concatenate(axis=-1, name="prior_input")([self.x_tm1, self.z_tm1])
         rnn_prior = RecurrentLayer(self.n_hidden_recurrent,
                                    return_sequences=True,
-                                   stateful=(phase == Phases.predict),
-                                   consume_less='gpu')(
+                                   stateful=(phase == Phases.predict))(
             prior_input)
-        rnn_rec_mu = TimeDistributed(Dense(self.latent_dim, activation='linear'))(rnn_prior)
-        rnn_rec_sigma = TimeDistributed(Dense(self.latent_dim, activation="softplus"))(rnn_prior)
+        rnn_rec_mu = TimeDistributed(Dense(self.latent_dim, activation='linear'), name="prior_mu")(rnn_prior)
+        rnn_rec_sigma = TimeDistributed(Dense(self.latent_dim, activation="softplus"), name="prior_sigma")(rnn_prior)
 
-        return merge([rnn_rec_mu, rnn_rec_sigma], mode="concat")
+        return Concatenate(axis=-1, name="prior_stats")([rnn_rec_mu, rnn_rec_sigma])
 
     def build(self, phase=Phases.train, seq_shape=None, batch_size=None):
         if phase == Phases.train:
