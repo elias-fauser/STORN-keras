@@ -140,7 +140,7 @@ class STORNModel(object):
         output = Concatenate(axis=-1)([gen_mu, gen_sigma, z_post_stats, z_prior_stats])
         inputs = [x_t, x_tm1] if self.with_trending_prior else [x_t, x_tm1, z_prior_stats]
         model = Model(inputs=inputs, outputs=output)
-        model.compile(optimizer='rmsprop', loss=keras_variational_func(self.data_dim, self.latent_dim))
+        model.compile(optimizer='adam', loss=keras_variational_func(self.data_dim, self.latent_dim))
         # metrics=[keras_gauss, keras_divergence, mu_minus_x, mean_sigma]
 
         return model
