@@ -87,7 +87,8 @@ class STORNModel(object):
             "with_trending_prior": self.with_trending_prior,
             "output_folder": self.output_folder,
             "prefix": self.prefix,
-            "embedding": self.embedding.get_config() if self.embedding else None
+            "embedding": {'class_name': self.embedding.__class__.__name__,
+                          'config': self.embedding.get_config()} if self.embedding else None
         }
 
     def set_params(self, **params):
