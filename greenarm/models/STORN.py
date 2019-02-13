@@ -62,13 +62,13 @@ class STORNModel(object):
         self.prefix = prefix or ""
 
     @classmethod
-    def from_files(cls, model_file, weights_file, **kwargs):
+    def from_files(cls, model_file, weights_file, custom_objects=None, **kwargs):
 
         instance = cls(**kwargs)
 
         with open(model_file, "r") as f:
             params = json.load(f)
-            instance.set_params(**params)
+            instance.set_params(params, custom_objects=custom_objects)
 
         instance.build(batch_size=params.get("batch_size", 32))
         instance.load_predict_weights(weights_file)
@@ -91,13 +91,13 @@ class STORNModel(object):
                           'config': self.embedding.get_config()} if self.embedding else None
         }
 
-    def set_params(self, **params):
+    def set_params(self, params, custom_objects=None):
         for param_name, param in params.items():
 
             if param_name == "embedding":
                 if not param:
                     continue
-                param = deserialize(param)
+                param = deserialize(param, custom_objects=custom_objects)
             setattr(self, param_name, param)
 
         return self
