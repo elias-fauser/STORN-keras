@@ -3,7 +3,6 @@ import keras.backend as K
 import greenarm.models.keras_fix as kf
 
 # Apply the keras fix
-print("Applying keras fix...")
 
 import keras.layers as l
 
@@ -38,6 +37,7 @@ def compute_mask_concat(self, inputs, mask=None):
     return K.all(concatenated, axis=-1, keepdims=False)
 
 # Mokey Patch
+# print("Applying keras fix...")
 # l.Concatenate.compute_mask = compute_mask_concat
 # l.Add.compute_mask = compute_mask_sum_mul_ave
 # l.Subtract.compute_mask = compute_mask_sum_mul_ave

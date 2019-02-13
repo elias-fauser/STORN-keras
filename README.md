@@ -22,6 +22,7 @@ The dependencies might be installed with the `pip` requirements file.
  - Name Scopes were introduced
  - Hard coded data dimensionality was moved into keyword arguments
  - Shape function calls were updated
+ - Removed the padding on the training and validation targets
 
 ### Usage
 
