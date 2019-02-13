@@ -33,7 +33,7 @@ class Phases:
 class STORNModel(object):
     def __init__(self, latent_dim=7, data_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, 
                  n_deep=6, dropout=0, activation='tanh', with_trending_prior=False, monitor=False, 
-                 output_folder=None, prefix=None):
+                 output_folder=None, prefix=None, embedding=None):
         # Tensor shapes
         self.data_dim = data_dim
         self.latent_dim = latent_dim
@@ -44,6 +44,7 @@ class STORNModel(object):
         self.n_deep = n_deep
         self.dropout = dropout
         self.activation = activation
+        self.embedding = embedding
 
         # STORN options
         self.with_trending_prior = with_trending_prior
@@ -84,7 +85,8 @@ class STORNModel(object):
             "activation": self.activation,
             "with_trending_prior": self.with_trending_prior,
             "output_folder": self.output_folder,
-            "prefix": self.prefix
+            "prefix": self.prefix,
+            "embedding": self.embedding
         }
 
     def set_params(self, **params):
@@ -101,7 +103,7 @@ class STORNModel(object):
                                                             self.n_hidden_recurrent, self.n_deep, self.dropout,
                                                             self.activation)
 
-            self.z_recognition_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size)
+            self.z_recognition_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size, embedding=self.embedding)
 
             if phase == Phases.train:
                 x_tm1 = Input(shape=(seq_shape, self.data_dim), name="storn_input_train", dtype="float32")
@@ -308,11 +310,14 @@ class STORNRecognitionModel(object):
         self.predict_input = None
         self.predict_z_t = None
 
-    def _build(self, phase, seq_shape=None, batch_size=None):
+    def _build(self, phase, seq_shape=None, batch_size=None, embedding=None):
         if phase == Phases.train:
             x_t = Input(shape=(seq_shape, self.data_dim), name="stornREC_input_train", dtype="float32")
         else:
             x_t = Input(batch_shape=(batch_size, 1, self.data_dim), name="stornREC_input_predict", dtype="float32")
+
+        if embedding:
+            x_t = embedding(x_t)
 
         # Unmasked Layer
         recogn_input = x_t
@@ -343,12 +348,14 @@ class STORNRecognitionModel(object):
 
         return recogn_stats, x_t, z_t
 
-    def build(self, phase=Phases.train, seq_shape=None, batch_size=None):
+    def build(self, phase=Phases.train, seq_shape=None, batch_size=None, embedding=None):
         if phase == Phases.train:
-            self.train_recogn_stats, self.train_input, self.train_z_t = self._build(Phases.train, seq_shape=seq_shape)
+            self.train_recogn_stats, self.train_input, self.train_z_t = self._build(Phases.train, 
+                                                                                    seq_shape=seq_shape, embedding=embedding)
         else:
             self.predict_recogn_stats, self.predict_input, self.predict_z_t = self._build(Phases.predict,
-                                                                                          batch_size=batch_size)
+                                                                                          batch_size=batch_size,
+                                                                                          embedding=embedding)
 
     @staticmethod
     def do_sample(statistics, batch_size, dim_size):
