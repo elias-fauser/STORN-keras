@@ -11,6 +11,7 @@ import keras.backend as K
 from keras.callbacks import ModelCheckpoint, EarlyStopping, RemoteMonitor, TensorBoard
 from keras.models import Model
 from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN, Concatenate
+from keras.layers import deserialize
 from greenarm.models.keras_fix.lambdawithmasking import LambdaWithMasking
 from greenarm.models.loss.variational import keras_variational_func
 from greenarm.models.sampling.sampling import sample_gauss
@@ -86,11 +87,16 @@ class STORNModel(object):
             "with_trending_prior": self.with_trending_prior,
             "output_folder": self.output_folder,
             "prefix": self.prefix,
-            "embedding": self.embedding
+            "embedding": self.embedding.get_config() if self.embedding else None
         }
 
     def set_params(self, **params):
         for param_name, param in params.items():
+
+            if param_name == "embedding":
+                if not param:
+                    continue
+                param = deserialize(param)
             setattr(self, param_name, param)
 
         return self
@@ -200,7 +206,7 @@ class STORNModel(object):
         train_target, valid_target = target[:split_idx], target[split_idx:]
 
         # Save the parameters
-        with open(os.path.join(self.output_folder, self.prefix + "parameters.json", "w")) as f:
+        with open(os.path.join(self.output_folder, self.prefix + "parameters.json"), "w") as f:
             json.dump(self.get_params(), f, indent=4)
 
         weights_path = os.path.join(self.output_folder, self.prefix + "weights.h5")
@@ -316,11 +322,11 @@ class STORNRecognitionModel(object):
         else:
             x_t = Input(batch_shape=(batch_size, 1, self.data_dim), name="stornREC_input_predict", dtype="float32")
 
-        if embedding:
-            x_t = embedding(x_t)
-
         # Unmasked Layer
         recogn_input = x_t
+
+        if embedding:
+            recogn_input = embedding(recogn_input)
 
         for i in range(self.n_deep):
             recogn_input = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(recogn_input)
