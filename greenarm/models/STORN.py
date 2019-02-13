@@ -197,18 +197,15 @@ class STORNModel(object):
         train_input, valid_input = [list(t) for t in zip(*[(X[:split_idx], X[split_idx:]) for X in list_in])]
         train_target, valid_target = target[:split_idx], target[split_idx:]
 
-        tensor_board = TensorBoard(log_dir="./logs", histogram_freq=1, write_images=True)
-        checkpoint = ModelCheckpoint("best_storn_weights.h5", save_best_only=True, verbose=1)
+        # Save the parameters
+        with open(os.path.join(self.output_folder, self.prefix + "parameters.json", "w")) as f:
+            json.dump(self.get_params(), f, indent=4)
+
+        weights_path = os.path.join(self.output_folder, self.prefix + "weights.h5")
+        tensor_board = TensorBoard(log_dir=os.path.join(self.output_folder, "logs"), histogram_freq=1, write_images=True)
+        checkpoint = ModelCheckpoint(weights_path, save_best_only=True, verbose=1)
         early_stop = EarlyStopping(patience=25, verbose=1)
         try:
-            # A workaround so that keras does not complain about target and pred shape mismatches
-            padded_target = np.concatenate(
-                (train_target, np.zeros((train_target.shape[0], seq_len, 4 * self.latent_dim + data_dim))),
-                axis=-1)
-            padded_valid_target = np.concatenate(
-                (valid_target, np.zeros((valid_target.shape[0], seq_len, 4 * self.latent_dim + self.data_dim))),
-                axis=-1)
-
             callbacks = [checkpoint, early_stop, tensor_board]
             if self.monitor:
                 monitor = RemoteMonitor(root='http://localhost:9000')
@@ -262,7 +259,7 @@ class STORNModel(object):
         # compute loss based on predictions
         x = K.placeholder(ndim=3, dtype="float32")
         stats = K.placeholder(ndim=3, dtype="float32")
-        get_loss = K.function(inputs=[x, stats], outputs=keras_variational_func(self.data_dim, self.latent_dim)(x, stats))
+        get_loss = K.function(inputs=[x, stats], outputs=[keras_variational_func(self.data_dim, self.latent_dim)(x, stats)])
         loss = get_loss([padded_target, predictions])
         return predictions[:, :, :data_dim], loss
 
