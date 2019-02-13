@@ -4,6 +4,9 @@ Implementation of the STORN model from the paper.
 import logging
 import numpy as np
 import time
+import os
+import json
+
 import keras.backend as K
 from keras.callbacks import ModelCheckpoint, EarlyStopping, RemoteMonitor, TensorBoard
 from keras.models import Model
@@ -28,8 +31,9 @@ class Phases:
 
 
 class STORNModel(object):
-    def __init__(self, latent_dim=7, data_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, n_deep=6, dropout=0, activation='tanh',
-                 with_trending_prior=False, monitor=False, prefix=None):
+    def __init__(self, latent_dim=7, data_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, 
+                 n_deep=6, dropout=0, activation='tanh', with_trending_prior=False, monitor=False, 
+                 output_folder=None, prefix=None):
         # Tensor shapes
         self.data_dim = data_dim
         self.latent_dim = latent_dim
@@ -49,21 +53,38 @@ class STORNModel(object):
         self.z_recognition_model = None
         self.train_model = None
         self.predict_model = None
-        self._weights_updated = False
 
         # Misc
         self.monitor = monitor
+        self.output_folder = output_folder or ""
         self.prefix = prefix or ""
+
+    @classmethod
+    def from_files(cls, model_file, weights_file, **kwargs):
+
+        instance = cls(**kwargs)
+
+        with open(model_file, "r") as f:
+            params = json.load(f)
+            instance.set_params(**params)
+
+        instance.build(batch_size=params.get("batch_size", 32))
+        instance.load_predict_weights(weights_file)
+
+        return instance
 
     def get_params(self):
         return {
+            "data_dim": self.data_dim,
             "latent_dim": self.latent_dim,
             "n_hidden_dense": self.n_hidden_dense,
             "n_hidden_recurrent": self.n_hidden_recurrent,
             "n_deep": self.n_deep,
             "dropout": self.dropout,
             "activation": self.activation,
-            "with_trending_prior": self.with_trending_prior
+            "with_trending_prior": self.with_trending_prior,
+            "output_folder": self.output_folder,
+            "prefix": self.prefix
         }
 
     def set_params(self, **params):
@@ -149,10 +170,11 @@ class STORNModel(object):
         self.train_model = self._build(Phases.train, seq_shape=seq_shape)
         self.predict_model = self._build(Phases.predict, batch_size=batch_size)
 
-    def load_predict_weights(self):
+    def load_predict_weights(self, weights_file):
         # self.train_model.save_weights("storn_weights.h5", overwrite=True)
-        self.predict_model.load_weights("best_storn_weights.h5")
-        self._weights_updated = False
+        self.predict_model.load_weights(weights_file)
+        self.train_model.load_weights(weights_file)
+        return True
 
     def reset_predict_model(self):
         self.predict_model.reset_states()
@@ -195,9 +217,8 @@ class STORNModel(object):
         except KeyboardInterrupt:
             logger.info("Training interrupted! Restoring best weights and saving..")
 
-        self.train_model.load_weights("best_storn_weights.h5")
-        self._weights_updated = True
-        self.save()
+        # Reload the best weights
+        self.train_model.load_weights(weights_path)
 
     def predict_one_step(self, inputs):
         n_sequences = inputs[0].shape[0]
@@ -258,16 +279,6 @@ class STORNModel(object):
     def reset_predict_model_states(self):
         self.predict_model.reset_states()
 
-    def save(self):
-  
-        logger.info("Saving model to %s" % self.prefix)
-
-        # with codecs.open(prefix + ".json", "w", "UTF-8") as of:
-        #     of.write(self.train_model.to_json())
-
-        self.train_model.save_weights(self.prefix + "weights.h5")
-        return self.prefix
-
     @staticmethod
     def shift_z(rec_z):
         return K.concatenate((K.random_normal(shape=(K.shape(rec_z)[0], 1, K.shape(rec_z)[2])),
@@ -305,12 +316,6 @@ class STORNRecognitionModel(object):
             x_t = Input(shape=(seq_shape, self.data_dim), name="stornREC_input_train", dtype="float32")
         else:
             x_t = Input(batch_shape=(batch_size, 1, self.data_dim), name="stornREC_input_predict", dtype="float32")
-
-        # Recognition model
-
-        # Fix of keras/engine/topology.py required for masked layer!
-        # Otherwise concat with masked and non masked layer returns an error!
-        # recogn_input = Masking()(x_t)
 
         # Unmasked Layer
         recogn_input = x_t
