@@ -250,7 +250,7 @@ class STORNModel(object):
         n_sequences = target.shape[0]
         seq_len = target.shape[1]
         data_dim = target.shape[2]
-        assert data_dim == self.data_dim
+        assert data_dim == self.data_dim, "Data dimensions do not match! Model is expecting {} features. Input has {}".format(self.data_dim, data_dim)
 
         # prepare inputs
         list_in = inputs[:]
