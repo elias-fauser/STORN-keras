@@ -102,18 +102,21 @@ def keras_variational_func(x_dim, latent_dim, rec="gauss"):
         x_stripped = x[:, :, :x_dim]
         gen_mu, gen_sigma = output_statistics[:, :, :x_dim], output_statistics[:, :, x_dim:2 * x_dim]
 
+        encoder_mu = output_statistics[:, :, 2 * x_dim:2 * x_dim + latent_dim]
+        encoder_sigma = output_statistics[:, :, 2 * x_dim + latent_dim:2 * x_dim + 2 * latent_dim]
+        prior_mu = output_statistics[:, :, 2 * x_dim + 2 * latent_dim: 2 * x_dim + 3 * latent_dim]
+        prior_sigma = output_statistics[:, :, 2 * x_dim + 3 * latent_dim:]
         if rec == "gauss":
-            expect_term = bernoulli(x_stripped, gen_mu, gen_sigma)
-        elif rec == "bernoulli":
             expect_term = gauss(x_stripped, gen_mu, gen_sigma)
+            kl_term = divergence(encoder_mu, encoder_sigma,
+                                prior_mu, prior_sigma)
+        elif rec == "bernoulli":
+            expect_term = bernoulli(x_stripped, gen_mu, gen_sigma)
+            # Encoder mu and prior mu are actually the learned probabilities
+            kl_term = K.mean(K.square(encoder_mu - prior_mu))
         else:
             raise ValueError("Unknown rec function!")
         
-        kl_term = divergence(output_statistics[:, :, 2 * x_dim:2 * x_dim + latent_dim],
-                            output_statistics[:, :, 2 * x_dim + latent_dim:2 * x_dim + 2 * latent_dim],
-                            output_statistics[:, :, 2 * x_dim + 2 * latent_dim: 2 * x_dim + 3 * latent_dim],
-                            output_statistics[:, :, 2 * x_dim + 3 * latent_dim:],
-                            )
         return kl_term + expect_term
     
     return keras_variational

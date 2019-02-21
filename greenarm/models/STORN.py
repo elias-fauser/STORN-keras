@@ -14,7 +14,7 @@ from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN,
 from keras.layers import deserialize
 from greenarm.models.keras_fix.lambdawithmasking import LambdaWithMasking
 from greenarm.models.loss.variational import keras_variational_func
-from greenarm.models.sampling.sampling import sample_gauss
+from greenarm.models.sampling.sampling import sample_gauss, sample_bernoulli
 from greenarm.util import add_samples_until_divisible, get_logger
 
 logger = get_logger(__name__)
@@ -109,7 +109,7 @@ class STORNModel(object):
         with K.name_scope("recognition_model"):
             self.z_recognition_model = STORNRecognitionModel(self.data_dim, self.latent_dim, self.n_hidden_dense,
                                                             self.n_hidden_recurrent, self.n_deep, self.dropout,
-                                                            self.activation)
+                                                            self.activation, rec=self.rec)
 
             self.z_recognition_model.build(phase=phase, seq_shape=seq_shape, batch_size=batch_size, embedding=self.embedding)
 
@@ -298,7 +298,7 @@ class STORNModel(object):
 
 class STORNRecognitionModel(object):
     def __init__(self, data_dim, latent_dim, n_hidden_dense,
-                 n_hidden_recurrent, n_deep, dropout, activation):
+                 n_hidden_recurrent, n_deep, dropout, activation, rec="gauss"):
         # Tensor shapes
         self.data_dim = data_dim
         self.latent_dim = latent_dim
@@ -309,6 +309,7 @@ class STORNRecognitionModel(object):
         self.n_deep = n_deep
         self.dropout = dropout
         self.activation = activation
+        self.rec = rec
 
         # Model states
         self.train_recogn_stats = None
@@ -377,7 +378,10 @@ class STORNRecognitionModel(object):
             batch_size = K.shape(mu)[0]
 
         # sample with this mean and variance
-        return sample_gauss(mu, sigma, batch_size, dim_size)
+        if self.rec == "gauss":
+            return sample_gauss(mu, sigma, batch_size, dim_size)
+        elif self.rec == "bernoulli":
+            return sample_bernoulli(mu, batch_size, dim_size)
 
     @staticmethod
     def sample_output_shape(input_shape):
