@@ -10,6 +10,7 @@ import json
 import keras.backend as K
 from keras.callbacks import ModelCheckpoint, EarlyStopping, RemoteMonitor, TensorBoard
 from keras.models import Model
+from keras.optimizers import Adam
 from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN, Concatenate, LSTM
 from keras.layers import deserialize
 from greenarm.models.keras_fix.lambdawithmasking import LambdaWithMasking
@@ -19,7 +20,7 @@ from greenarm.util import add_samples_until_divisible, get_logger
 
 logger = get_logger(__name__)
 
-RecurrentLayer = GRU
+RecurrentLayer = LSTM
 
 
 # enum for different phases
@@ -34,7 +35,7 @@ class Phases:
 class STORNModel(object):
     def __init__(self, latent_dim=7, data_dim=7, n_hidden_dense=50, n_hidden_recurrent=128, rec="gauss",
                  n_deep=6, dropout=0, activation='tanh', with_trending_prior=False, monitor=False, 
-                 output_folder=None, prefix=None, embedding=None):
+                 output_folder=None, prefix=None, embedding=None, learning_rate=0.001):
         # Tensor shapes
         self.data_dim = data_dim
         self.latent_dim = latent_dim
@@ -47,6 +48,7 @@ class STORNModel(object):
         self.activation = activation
         self.embedding = embedding
         self.rec = rec
+        self.learning_rate = learning_rate
 
         # STORN options
         self.with_trending_prior = with_trending_prior
@@ -171,7 +173,8 @@ class STORNModel(object):
         output = Concatenate(axis=-1)([gen_mu, gen_sigma, z_post_stats, z_prior_stats])
         inputs = [x_t, x_tm1] if self.with_trending_prior else [x_t, x_tm1, z_prior_stats]
         model = Model(inputs=inputs, outputs=output)
-        model.compile(optimizer='adam', loss=keras_variational_func(self.data_dim, self.latent_dim, rec=self.rec))
+        adam = Adam(lr=self.learning_rate)
+        model.compile(optimizer=adam, loss=keras_variational_func(self.data_dim, self.latent_dim, rec=self.rec))
         # metrics=[keras_gauss, keras_divergence, mu_minus_x, mean_sigma]
 
         return model
