@@ -8,3 +8,7 @@ def sample_gauss(mu, sig, batch_size, dim_size):
                               dtype="float32")
     sample = mu + sig * epsilon
     return sample
+
+def sample_bernoulli(p, batch_size, dim_size):
+    uni = K.random_uniform((batch_size, dim_size))
+    return K.less(uni, p)
