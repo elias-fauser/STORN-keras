@@ -113,7 +113,7 @@ def keras_variational_func(x_dim, latent_dim, rec="gauss"):
         elif rec == "bernoulli":
             expect_term = bernoulli(x_stripped, gen_mu, gen_sigma)
             # Encoder mu and prior mu are actually the learned probabilities
-            kl_term = K.mean(K.square(encoder_mu - prior_mu))
+            kl_term = K.mean(K.square(encoder_mu - prior_mu), axis=-1)
         else:
             raise ValueError("Unknown rec function!")
         

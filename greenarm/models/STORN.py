@@ -10,7 +10,7 @@ import json
 import keras.backend as K
 from keras.callbacks import ModelCheckpoint, EarlyStopping, RemoteMonitor, TensorBoard
 from keras.models import Model
-from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN, Concatenate
+from keras.layers import Input, TimeDistributed, Dense, Dropout, GRU, SimpleRNN, Concatenate, LSTM
 from keras.layers import deserialize
 from greenarm.models.keras_fix.lambdawithmasking import LambdaWithMasking
 from greenarm.models.loss.variational import keras_variational_func
@@ -164,7 +164,7 @@ class STORNModel(object):
                     gen_map = Dropout(self.dropout)(gen_map)
 
             # Output statistics for the generative model
-            gen_mu = TimeDistributed(Dense(self.data_dim, activation="linear"))(gen_map)
+            gen_mu = TimeDistributed(Dense(self.data_dim, activation='linear' if self.rec == "gauss" else "sigmoid"))(gen_map)
             gen_sigma = TimeDistributed(Dense(self.data_dim, activation="softplus"))(gen_map)
 
         # Combined model
@@ -198,7 +198,7 @@ class STORNModel(object):
         # Build the train model
         list_in = inputs[:]
         if not self.with_trending_prior:
-            list_in.append(STORNPriorModel.standard_input(n_sequences, seq_len, self.latent_dim))
+            list_in.append(STORNPriorModel.standard_input(n_sequences, seq_len, self.latent_dim, mode=self.rec))
         self.train_model = self._build(Phases.train, seq_shape=seq_len)
         # self.train_model.load_weights("start_weights.h5")
 
@@ -235,7 +235,7 @@ class STORNModel(object):
 
         list_in = inputs[:]
         if not self.with_trending_prior:
-            list_in.append(STORNPriorModel.standard_input(n_sequences, seq_len, self.latent_dim))
+            list_in.append(STORNPriorModel.standard_input(n_sequences, seq_len, self.latent_dim, mode=self.rec))
 
         _batch_size = 32
         pred_inputs = [add_samples_until_divisible(input_x, _batch_size) for input_x in list_in]
@@ -256,7 +256,7 @@ class STORNModel(object):
         # prepare inputs
         list_in = inputs[:]
         if not self.with_trending_prior:
-            list_in.append(STORNPriorModel.standard_input(n_sequences, seq_len, self.latent_dim))
+            list_in.append(STORNPriorModel.standard_input(n_sequences, seq_len, self.latent_dim, mode=self.rec))
 
         # prepare target
         padded_target = np.concatenate(
@@ -269,7 +269,7 @@ class STORNModel(object):
         # compute loss based on predictions
         x = K.placeholder(ndim=3, dtype="float32")
         stats = K.placeholder(ndim=3, dtype="float32")
-        get_loss = K.function(inputs=[x, stats], outputs=[keras_variational_func(self.data_dim, self.latent_dim)(x, stats)])
+        get_loss = K.function(inputs=[x, stats], outputs=[keras_variational_func(self.data_dim, self.latent_dim, rec=self.rec)(x, stats)])
         loss = get_loss([padded_target, predictions])
         return predictions[:, :, :data_dim], loss
 
@@ -346,7 +346,7 @@ class STORNRecognitionModel(object):
             if self.dropout != 0:
                 recogn_map = Dropout(self.dropout)(recogn_map)
 
-        recogn_mu = TimeDistributed(Dense(self.latent_dim, activation='linear'), name="recognition_mu")(recogn_map)
+        recogn_mu = TimeDistributed(Dense(self.latent_dim, activation='linear' if self.rec == "gauss" else "sigmoid"), name="recognition_mu")(recogn_map)
         recogn_sigma = TimeDistributed(Dense(self.latent_dim, activation="softplus", name="recognition_sigma"))(recogn_map)
         recogn_stats = Concatenate(axis=-1, name="recognition_stats")([recogn_mu, recogn_sigma])
 
@@ -393,12 +393,13 @@ class STORNRecognitionModel(object):
 
 
 class STORNPriorModel(object):
-    def __init__(self, latent_dim, trending, n_hidden_recurrent=None, x_tm1=None, z_tm1=None):
+    def __init__(self, latent_dim, trending, n_hidden_recurrent=None, x_tm1=None, z_tm1=None, rec="gauss"):
         # Tensor shapes
         self.latent_dim = latent_dim
 
         # Network complexity
         self.n_hidden_recurrent = n_hidden_recurrent
+        self.rec = rec
 
         # STORN options
         self.trending = trending
@@ -424,7 +425,7 @@ class STORNPriorModel(object):
                                    return_sequences=True,
                                    stateful=(phase == Phases.predict))(
             prior_input)
-        rnn_rec_mu = TimeDistributed(Dense(self.latent_dim, activation='linear'), name="prior_mu")(rnn_prior)
+        rnn_rec_mu = TimeDistributed(Dense(self.latent_dim, activation='linear' if self.rec == "gauss" else "sigmoid"), name="prior_mu")(rnn_prior)
         rnn_rec_sigma = TimeDistributed(Dense(self.latent_dim, activation="softplus"), name="prior_sigma")(rnn_prior)
 
         return Concatenate(axis=-1, name="prior_stats")([rnn_rec_mu, rnn_rec_sigma])
@@ -442,15 +443,28 @@ class STORNPriorModel(object):
                 self.predict_prior_stats = self._build_std(phase, batch_size=batch_size)
 
     @staticmethod
-    def standard_input(number_of_series, seq_len, latent_dim):
-        sigma = np.ones(
-            (number_of_series, seq_len, latent_dim),
-            dtype="float32"
-        )
-        my = np.zeros(
-            (number_of_series, seq_len, latent_dim),
-            dtype="float32"
-        )
+    def standard_input(number_of_series, seq_len, latent_dim, mode="gauss"):
+        if mode == "gauss":
+            sigma = np.ones(
+                (number_of_series, seq_len, latent_dim),
+                dtype="float32"
+            )
+            my = np.zeros(
+                (number_of_series, seq_len, latent_dim),
+                dtype="float32"
+            )
+        elif mode == "bernoulli":
+            sigma = np.zeros(
+                (number_of_series, seq_len, latent_dim),
+                dtype="float32"
+            )
+            my = np.full(
+                (number_of_series, seq_len, latent_dim), 0.5,
+                dtype="float32"
+            )
+        else:
+            raise ValueError("Unknown mode!")
+
         return np.concatenate([my, sigma], axis=-1)
 
 

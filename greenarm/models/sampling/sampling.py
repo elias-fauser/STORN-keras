@@ -10,5 +10,5 @@ def sample_gauss(mu, sig, batch_size, dim_size):
     return sample
 
 def sample_bernoulli(p, batch_size, dim_size):
-    uni = K.random_uniform((batch_size, dim_size))
-    return K.less(uni, p)
+    uni = K.random_uniform((batch_size, dim_size), minval=0., maxval=1.)
+    return K.cast(K.less(uni, p), "float32")
