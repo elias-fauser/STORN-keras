@@ -170,7 +170,7 @@ class STORNModel(object):
         output = Concatenate(axis=-1)([gen_mu, gen_sigma, z_post_stats, z_prior_stats])
         inputs = [x_t, x_tm1] if self.with_trending_prior else [x_t, x_tm1, z_prior_stats]
         model = Model(inputs=inputs, outputs=output)
-        model.compile(optimizer='adam', loss=keras_variational_func(self.data_dim, self.latent_dim))
+        model.compile(optimizer='adam', loss=keras_variational_func(self.data_dim, self.latent_dim, rec="bernoulli"))
         # metrics=[keras_gauss, keras_divergence, mu_minus_x, mean_sigma]
 
         return model
@@ -316,6 +316,7 @@ class STORNRecognitionModel(object):
         self.predict_recogn_stats = None
         self.predict_input = None
         self.predict_z_t = None
+        self.rec_input = None
 
     def _build(self, phase, seq_shape=None, batch_size=None, embedding=None):
         if phase == Phases.train:
@@ -330,9 +331,10 @@ class STORNRecognitionModel(object):
             recogn_input = embedding(recogn_input)
 
         for i in range(self.n_deep):
-            recogn_input = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(recogn_input)
+            layer = TimeDistributed(Dense(self.n_hidden_dense, activation=self.activation))(recogn_input)
             if self.dropout != 0.0:
                 recogn_input = Dropout(self.dropout)(recogn_input)
+        self.rec_input = recogn_input
 
         recogn_rnn = RecurrentLayer(self.n_hidden_recurrent, return_sequences=True, stateful=(phase == Phases.predict))(recogn_input)
 
