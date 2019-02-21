@@ -69,6 +69,11 @@ def keras_divergence(x, output_statistics):
                              output_statistics[:, :, 2 * x_dim + 3 * latent_dim:],
                              ))
 
+def bernoulli(x, p, _):
+
+    s = x * p + (1. - x) * (1. - p)
+    return K.sum(s, axis=-1)
+
 def keras_gauss_func(x_dim):
     
     def keras_gauss(x, output_statistics):
@@ -79,7 +84,7 @@ def keras_gauss_func(x_dim):
 
     return keras_gauss
 
-def keras_variational_func(x_dim, latent_dim):
+def keras_variational_func(x_dim, latent_dim, rec="gauss"):
     def keras_variational(x, output_statistics):
         """
         A wrapper around the variational upper bound loss for keras.
@@ -96,7 +101,13 @@ def keras_variational_func(x_dim, latent_dim):
         # and then 4*latent_dim, the mu, sigma of z|x, and mu, sigma of z (prior)
         x_stripped = x[:, :, :x_dim]
         gen_mu, gen_sigma = output_statistics[:, :, :x_dim], output_statistics[:, :, x_dim:2 * x_dim]
-        expect_term = gauss(x_stripped, gen_mu, gen_sigma)
+
+        if rec == "gauss":
+            expect_term = bernoulli(x_stripped, gen_mu, gen_sigma)
+        elif rec == "bernoulli":
+            expect_term = gauss(x_stripped, gen_mu, gen_sigma)
+        else:
+            raise ValueError("Unknown rec function!")
         
         kl_term = divergence(output_statistics[:, :, 2 * x_dim:2 * x_dim + latent_dim],
                             output_statistics[:, :, 2 * x_dim + latent_dim:2 * x_dim + 2 * latent_dim],
